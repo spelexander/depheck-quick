@@ -41,14 +41,17 @@ fn main() {
         .arg(Arg::with_name("ext")
             .short("e")
             .long("ext")
-            .help("File extensions to scan, defaults to (.tsx|.ts|.jsx|.js|.mjs|.cjs)")
+            .help("Regex for file extensions to scan, defaults to (.tsx|.ts|.jsx|.js|.mjs|.cjs)")
             .takes_value(true))
         .get_matches();
 
     let root = matches.value_of("root").unwrap_or(".");
+
     let src = matches.value_of("src").unwrap_or("./src");
+    let src = format!("{}/{}", &root, src);
+
     let extension_matcher = matches.value_of("ext").unwrap_or(r"(\.tsx$|\.ts$|\.jsx$|\.js$|\.mjs$|\.cjs$)");
-    let extension_matcher = Regex::new(&extension_matcher).expect("Invalid regex provided");
+    let extension_matcher = Regex::new(&extension_matcher).expect("Invalid extension regex provided");
 
     let package_json_path = root.ends_with(FILE_NAME).then(|| root.to_owned()).unwrap_or(format!("{}/{}", &root, FILE_NAME));
 
@@ -71,36 +74,23 @@ fn main() {
         .cloned()
         .collect();
 
-    let dev_deps: HashSet<String> = package.devDependencies
-        .keys()
-        .cloned()
-        .collect();
-
-
-    let mut all_deps = HashSet::new();
-    for dep in &deps {
-        all_deps.insert(dep.to_owned());
-    }
-    for dev_dep in &dev_deps {
-        all_deps.insert(dev_dep.to_owned());
-    }
-
     // Scan dist files for dev dependencies
-    let result = scan_files(&src, &extension_matcher, &all_deps);
+    let result = scan_files(&src, &extension_matcher, &deps);
     let mut new_deps: BTreeMap<String, String> = BTreeMap::new();
     let mut new_dev_deps: BTreeMap<String, String> = BTreeMap::new();
 
     for dep in result {
-        if dev_deps.contains(&*dep) {
-            // dev dep from the start
-            new_dev_deps.insert(dep.to_owned(), package.devDependencies.get(&*dep).unwrap().to_owned());
-        } else if dep.starts_with("@types") {
-            // should be in dev
-            new_dev_deps.insert(dep.to_owned(), package.dependencies.get(&*dep).unwrap().to_owned());
+        let version = package.devDependencies.get(&*dep).unwrap_or(package.dependencies.get(&*dep).unwrap()).to_owned();
+
+        if dep.starts_with("@types") || package.devDependencies.contains_key(&*dep) {
+            new_dev_deps.insert(dep.to_owned(), version, );
         } else {
-            // normal dep
-            new_deps.insert(dep.to_owned(), package.dependencies.get(&*dep).unwrap().to_owned());
+            new_deps.insert(dep.to_owned(), version);
         }
+    }
+
+    for (dep, version) in &package.devDependencies {
+        new_dev_deps.insert(dep.to_owned(), version.to_owned());
     }
 
     println!("📦  used packages: {} / {} dev", &new_deps.len(), &new_dev_deps.len());
@@ -110,20 +100,14 @@ fn main() {
         devDependencies: new_dev_deps,
     };
 
-    let old_package = Package {
-        dependencies: package.dependencies,
-        devDependencies: package.devDependencies,
-    };
-
-    let input= serde_json::to_string_pretty(&old_package).unwrap();
-    let output= serde_json::to_string_pretty(&new_package).expect("Could not serialise output json");
+    let input = serde_json::to_string_pretty(&package).unwrap();
+    let output = serde_json::to_string_pretty(&new_package).expect("Could not serialise output json");
 
     println!("📦  proposed changes:");
     println!("{}", diff_lines(&input, &output));
 }
 
 fn scan_files(path: &str, matcher: &Regex, dep_list: &HashSet<String>) -> HashSet<String> {
-
     let mut found_deps: HashSet<String> = HashSet::new();
     let mut check_list: HashSet<String> = dep_list.clone();
 
@@ -167,6 +151,13 @@ fn scan_files(path: &str, matcher: &Regex, dep_list: &HashSet<String>) -> HashSe
             if file_content.contains(&*dep) {
                 found_deps.insert(dep.to_owned());
                 check_list.remove(&*dep);
+
+                // if type exists add also
+                let type_variant = format!("@types/{}", dep);
+                if check_list.contains(&*type_variant) {
+                    found_deps.insert(type_variant.to_owned());
+                    check_list.remove(&*type_variant);
+                }
             }
         }
     }
