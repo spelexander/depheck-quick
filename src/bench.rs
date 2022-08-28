@@ -1,5 +1,5 @@
-use crate::scan_files_new;
 use crate::scan_files;
+
 use regex::Regex;
 use std::collections::HashSet;
 use std::time::Instant;
@@ -56,23 +56,12 @@ mod tests {
 
     #[test]
     fn scan_1() {
-        let runs = 10;
+        let runs = 50;
         let closure = || {
-            scan_files("/Users/alexspence/git/react/packages", &get_matcher(), &get_test_deps());
+            scan_files(".", &get_matcher(), &get_test_deps());
         };
 
         let stats = run_bench(runs, closure);
         println!("{}: {:?} (n={})", "scan 1", stats, runs);
-    }
-
-    #[test]
-    fn scan_2() {
-        let runs = 10;
-        let closure = || {
-            scan_files_new("/Users/alexspence/git/react/packages", &get_matcher(), &get_test_deps());
-        };
-
-        let stats = run_bench(runs, closure);
-        println!("{}: {:?} (n={})", "scan 2", stats, runs);
     }
 }

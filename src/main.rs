@@ -1,8 +1,6 @@
-mod bench;
-
 extern crate clap;
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Instant;
 use std::fs;
 use std::format;
@@ -12,6 +10,8 @@ use regex::Regex;
 use prettydiff::diff_lines;
 use jwalk::{Parallelism, WalkDir};
 use rayon::prelude::*;
+use daachorse::DoubleArrayAhoCorasick;
+use std::str;
 
 const FILE_NAME: &str = "package.json";
 
@@ -79,14 +79,20 @@ fn main() {
         .collect();
 
     // Scan dist files for dev dependencies
-    let result = scan_files_new(&src, &extension_matcher, &deps);
+    let result = scan_files(&src, &extension_matcher, &deps);
     let mut new_deps: BTreeMap<String, String> = BTreeMap::new();
     let mut new_dev_deps: BTreeMap<String, String> = BTreeMap::new();
 
     for dep in result {
         let version = package.devDependencies.get(&*dep).unwrap_or(package.dependencies.get(&*dep).unwrap()).to_owned();
 
-        if dep.starts_with("@types") || package.devDependencies.contains_key(&*dep) {
+        // if it contains a type dependency in the wrong place
+        let type_variant = format!("@types/{}", dep);
+        if package.dependencies.contains_key(&*type_variant) {
+            new_dev_deps.insert(type_variant.to_owned(), package.dependencies.get(&type_variant).unwrap().to_owned());
+        }
+
+        if package.devDependencies.contains_key(&*dep) {
             new_dev_deps.insert(dep.to_owned(), version);
         } else {
             new_deps.insert(dep.to_owned(), version);
@@ -115,14 +121,22 @@ fn main() {
 }
 
 fn scan_files(path: &str, matcher: &Regex, dep_list: &HashSet<String>) -> HashSet<String> {
-    let check_list = dep_list.clone();
+    let mut dep_by_id: HashMap<u16, String> = HashMap::new();
+    dep_list
+        .iter()
+        .enumerate()
+        .for_each(|(id, s)| {
+            dep_by_id.insert(id as u16, s.to_owned());
+        });
 
-    let found_deps = jwalk::WalkDir::new(path)
+    let searcher = DoubleArrayAhoCorasick::<u16>::new(dep_list).unwrap();
+
+    let found_deps: HashSet<u16> = WalkDir::new(path)
         .parallelism(Parallelism::RayonNewPool(0))
         .into_iter()
         .par_bridge()
         .filter_map(|dir_entry_result| {
-            let mut found_deps: HashSet<String> = HashSet::new();
+            let mut found_deps: HashSet<u16> = HashSet::new();
 
             let dir_entry = dir_entry_result.ok()?;
 
@@ -135,18 +149,11 @@ fn scan_files(path: &str, matcher: &Regex, dep_list: &HashSet<String>) -> HashSe
             }
 
             let path = dir_entry.path();
-            let file_content = std::fs::read_to_string(path).ok()?;
+            let file_content = std::fs::read(path).ok()?;
 
-            for dep in check_list.clone() {
-                if file_content.contains(&*dep) {
-                    found_deps.insert(dep.to_owned());
-
-                    // if type exists add also
-                    let type_variant = format!("@types/{}", dep);
-                    if check_list.contains(&*type_variant) {
-                        found_deps.insert(type_variant.to_owned());
-                    }
-                }
+            for matcher in searcher.find_iter(file_content) {
+                let val = matcher.value();
+                found_deps.insert(val);
             }
 
             return Some(found_deps);
@@ -154,51 +161,12 @@ fn scan_files(path: &str, matcher: &Regex, dep_list: &HashSet<String>) -> HashSe
         .flatten()
         .collect();
 
-    return found_deps;
-}
+    let mut result: HashSet<String> = HashSet::new();
+    for id in found_deps {
+        let dep = dep_by_id.get(&id).expect("Invalid pattern index returned");
+        result.insert(dep.to_owned());
+    }
 
-// OPTIMISATIONS
-
-fn scan_files_new(path: &str, matcher: &Regex, dep_list: &HashSet<String>) -> HashSet<String> {
-    let check_list = dep_list.clone();
-
-    let found_deps = jwalk::WalkDir::new(path)
-        .parallelism(Parallelism::RayonNewPool(0))
-        .into_iter()
-        .par_bridge()
-        .filter_map(|dir_entry_result| {
-            let mut found_deps: HashSet<String> = HashSet::new();
-
-            let dir_entry = dir_entry_result.ok()?;
-
-            if !dir_entry.file_type().is_file() {
-                return None;
-            }
-
-            if !matcher.is_match(&dir_entry.path().display().to_string()) {
-                return None;
-            }
-
-            let path = dir_entry.path();
-            let file_content = std::fs::read_to_string(path).ok()?;
-
-            for dep in check_list.clone() {
-                if file_content.contains(&*dep) {
-                    found_deps.insert(dep.to_owned());
-
-                    // if type exists add also
-                    let type_variant = format!("@types/{}", dep);
-                    if check_list.contains(&*type_variant) {
-                        found_deps.insert(type_variant.to_owned());
-                    }
-                }
-            }
-
-            return Some(found_deps);
-        })
-        .flatten()
-        .collect();
-
-    return found_deps;
+    return result;
 }
 
