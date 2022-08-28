@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use clap::{Arg, App};
 use regex::Regex;
 use prettydiff::diff_lines;
-use jwalk::{WalkDir};
+use jwalk::{Parallelism, WalkDir};
 use rayon::prelude::*;
 
 const FILE_NAME: &str = "package.json";
@@ -116,36 +116,41 @@ fn main() {
 
 fn scan_files(path: &str, matcher: &Regex, dep_list: &HashSet<String>) -> HashSet<String> {
     let check_list = dep_list.clone();
-    let mut files: Vec<String> = vec![];
 
-    for source_path in WalkDir::new(path) {
-        let entry = source_path.unwrap();
-        let file_name = entry.path().display().to_string();
-        // if not a valid file extension
-        if !matcher.is_match(&file_name) {
-            continue;
-        }
-        files.push(file_name);
-    }
+    let found_deps = jwalk::WalkDir::new(path)
+        .parallelism(Parallelism::RayonNewPool(0))
+        .into_iter()
+        .par_bridge()
+        .filter_map(|dir_entry_result| {
+            let mut found_deps: HashSet<String> = HashSet::new();
 
-    let found_deps = files.par_iter().map(|file_name| {
-        let file_content: String = fs::read_to_string(file_name).expect("Unable to find file");
-        let mut found_deps: HashSet<String> = HashSet::new();
+            let dir_entry = dir_entry_result.ok()?;
 
-        for dep in check_list.clone() {
-            if file_content.contains(&*dep) {
-                found_deps.insert(dep.to_owned());
+            if !dir_entry.file_type().is_file() {
+                return None;
+            }
 
-                // if type exists add also
-                let type_variant = format!("@types/{}", dep);
-                if check_list.contains(&*type_variant) {
-                    found_deps.insert(type_variant.to_owned());
+            if !matcher.is_match(&dir_entry.path().display().to_string()) {
+                return None;
+            }
+
+            let path = dir_entry.path();
+            let file_content = std::fs::read_to_string(path).ok()?;
+
+            for dep in check_list.clone() {
+                if file_content.contains(&*dep) {
+                    found_deps.insert(dep.to_owned());
+
+                    // if type exists add also
+                    let type_variant = format!("@types/{}", dep);
+                    if check_list.contains(&*type_variant) {
+                        found_deps.insert(type_variant.to_owned());
+                    }
                 }
             }
-        }
 
-        return found_deps;
-    })
+            return Some(found_deps);
+        })
         .flatten()
         .collect();
 
@@ -156,36 +161,41 @@ fn scan_files(path: &str, matcher: &Regex, dep_list: &HashSet<String>) -> HashSe
 
 fn scan_files_new(path: &str, matcher: &Regex, dep_list: &HashSet<String>) -> HashSet<String> {
     let check_list = dep_list.clone();
-    let mut files: Vec<String> = vec![];
 
-    for source_path in WalkDir::new(path) {
-        let entry = source_path.unwrap();
-        let file_name = entry.path().display().to_string();
-        // if not a valid file extension
-        if !matcher.is_match(&file_name) {
-            continue;
-        }
-        files.push(file_name);
-    }
+    let found_deps = jwalk::WalkDir::new(path)
+        .parallelism(Parallelism::RayonNewPool(0))
+        .into_iter()
+        .par_bridge()
+        .filter_map(|dir_entry_result| {
+            let mut found_deps: HashSet<String> = HashSet::new();
 
-    let found_deps = files.par_iter().map(|file_name| {
-        let file_content: String = fs::read_to_string(file_name).expect("Unable to find file");
-        let mut found_deps: HashSet<String> = HashSet::new();
+            let dir_entry = dir_entry_result.ok()?;
 
-        for dep in check_list.clone() {
-            if file_content.contains(&*dep) {
-                found_deps.insert(dep.to_owned());
+            if !dir_entry.file_type().is_file() {
+                return None;
+            }
 
-                // if type exists add also
-                let type_variant = format!("@types/{}", dep);
-                if check_list.contains(&*type_variant) {
-                    found_deps.insert(type_variant.to_owned());
+            if !matcher.is_match(&dir_entry.path().display().to_string()) {
+                return None;
+            }
+
+            let path = dir_entry.path();
+            let file_content = std::fs::read_to_string(path).ok()?;
+
+            for dep in check_list.clone() {
+                if file_content.contains(&*dep) {
+                    found_deps.insert(dep.to_owned());
+
+                    // if type exists add also
+                    let type_variant = format!("@types/{}", dep);
+                    if check_list.contains(&*type_variant) {
+                        found_deps.insert(type_variant.to_owned());
+                    }
                 }
             }
-        }
 
-        return found_deps;
-    })
+            return Some(found_deps);
+        })
         .flatten()
         .collect();
 
