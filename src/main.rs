@@ -1,3 +1,5 @@
+mod bench;
+
 extern crate clap;
 
 use std::collections::{BTreeMap, HashSet};
@@ -9,6 +11,7 @@ use clap::{Arg, App};
 use regex::Regex;
 use prettydiff::diff_lines;
 use jwalk::{WalkDir};
+use rayon::prelude::*;
 
 const FILE_NAME: &str = "package.json";
 
@@ -76,7 +79,7 @@ fn main() {
         .collect();
 
     // Scan dist files for dev dependencies
-    let result = scan_files(&src, &extension_matcher, &deps);
+    let result = scan_files_new(&src, &extension_matcher, &deps);
     let mut new_deps: BTreeMap<String, String> = BTreeMap::new();
     let mut new_dev_deps: BTreeMap<String, String> = BTreeMap::new();
 
@@ -112,42 +115,80 @@ fn main() {
 }
 
 fn scan_files(path: &str, matcher: &Regex, dep_list: &HashSet<String>) -> HashSet<String> {
-    let mut found_deps: HashSet<String> = HashSet::new();
-    let mut check_list: HashSet<String> = dep_list.clone();
+    let check_list = dep_list.clone();
+    let mut files: Vec<String> = vec![];
 
-    let parallel_reads = WalkDir::new(path);
-
-    // loop over every file/dir and dive deeper or scan for deps
-    for source_path in parallel_reads {
-        if check_list.len() == 0 {
-            break;
-        }
-
+    for source_path in WalkDir::new(path) {
         let entry = source_path.unwrap();
         let file_name = entry.path().display().to_string();
-
         // if not a valid file extension
         if !matcher.is_match(&file_name) {
             continue;
         }
+        files.push(file_name);
+    }
 
+    let found_deps = files.par_iter().map(|file_name| {
         let file_content: String = fs::read_to_string(file_name).expect("Unable to find file");
+        let mut found_deps: HashSet<String> = HashSet::new();
 
-        // if it's a match find specific dep and remove it from the master list
         for dep in check_list.clone() {
             if file_content.contains(&*dep) {
                 found_deps.insert(dep.to_owned());
-                check_list.remove(&*dep);
 
                 // if type exists add also
                 let type_variant = format!("@types/{}", dep);
                 if check_list.contains(&*type_variant) {
                     found_deps.insert(type_variant.to_owned());
-                    check_list.remove(&*type_variant);
                 }
             }
         }
-    }
+
+        return found_deps;
+    })
+        .flatten()
+        .collect();
 
     return found_deps;
 }
+
+// OPTIMISATIONS
+
+fn scan_files_new(path: &str, matcher: &Regex, dep_list: &HashSet<String>) -> HashSet<String> {
+    let check_list = dep_list.clone();
+    let mut files: Vec<String> = vec![];
+
+    for source_path in WalkDir::new(path) {
+        let entry = source_path.unwrap();
+        let file_name = entry.path().display().to_string();
+        // if not a valid file extension
+        if !matcher.is_match(&file_name) {
+            continue;
+        }
+        files.push(file_name);
+    }
+
+    let found_deps = files.par_iter().map(|file_name| {
+        let file_content: String = fs::read_to_string(file_name).expect("Unable to find file");
+        let mut found_deps: HashSet<String> = HashSet::new();
+
+        for dep in check_list.clone() {
+            if file_content.contains(&*dep) {
+                found_deps.insert(dep.to_owned());
+
+                // if type exists add also
+                let type_variant = format!("@types/{}", dep);
+                if check_list.contains(&*type_variant) {
+                    found_deps.insert(type_variant.to_owned());
+                }
+            }
+        }
+
+        return found_deps;
+    })
+        .flatten()
+        .collect();
+
+    return found_deps;
+}
+
