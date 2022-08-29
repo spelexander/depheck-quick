@@ -10,7 +10,7 @@ use regex::Regex;
 use prettydiff::diff_lines;
 use jwalk::{Parallelism, WalkDir};
 use rayon::prelude::*;
-use daachorse::DoubleArrayAhoCorasick;
+use daachorse::{DoubleArrayAhoCorasickBuilder, MatchKind};
 use std::str;
 
 const FILE_NAME: &str = "package.json";
@@ -122,14 +122,20 @@ fn main() {
 
 fn scan_files(path: &str, matcher: &Regex, dep_list: &HashSet<String>) -> HashSet<String> {
     let mut dep_by_id: HashMap<u16, String> = HashMap::new();
+    let mut patterns: Vec<String> = Vec::new();
+
     dep_list
         .iter()
         .enumerate()
         .for_each(|(id, s)| {
+            patterns.push(s.to_owned());
             dep_by_id.insert(id as u16, s.to_owned());
         });
 
-    let searcher = DoubleArrayAhoCorasick::<u16>::new(dep_list).unwrap();
+    let searcher = DoubleArrayAhoCorasickBuilder::new()
+        .match_kind(MatchKind::LeftmostLongest)
+        .build(&patterns)
+        .unwrap();
 
     let found_deps: HashSet<u16> = WalkDir::new(path)
         .parallelism(Parallelism::RayonNewPool(0))
@@ -151,7 +157,7 @@ fn scan_files(path: &str, matcher: &Regex, dep_list: &HashSet<String>) -> HashSe
             let path = dir_entry.path();
             let file_content = std::fs::read(path).ok()?;
 
-            for matcher in searcher.find_iter(file_content) {
+            for matcher in searcher.leftmost_find_iter(file_content) {
                 let val = matcher.value();
                 found_deps.insert(val);
             }

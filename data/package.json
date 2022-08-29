@@ -1,0 +1,13 @@
+{
+  "dependencies": {
+    "@dep/some": "1",
+    "dependency": "1",
+    "unused": "1",
+    "nested": "1",
+    "@types/dependency": "1"
+  },
+  "devDependencies": {
+    "devdependency": "1"
+  }
+}
+
