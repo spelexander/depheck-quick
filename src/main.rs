@@ -167,7 +167,16 @@ fn scan_files<'a>(
             let mut file_content = Vec::<u8>::new();
             for line in f.lines() {
                 let value = line.unwrap();
-                if value.trim().len() > 0 && !value.contains(NOT_AN_IMPORT) {
+                if value.trim().len() <= 0 {
+                    continue;
+                }
+
+                if value.starts_with("//") || value.starts_with("/*") {
+                    continue;
+                }
+
+
+                if !value.contains(NOT_AN_IMPORT) {
                     break;
                 }
                 file_content.extend_from_slice(&value.as_bytes());
