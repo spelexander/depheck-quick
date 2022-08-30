@@ -10,10 +10,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::format;
 use std::fs;
+use std::io::{BufRead, BufReader};
+use std::fs::File;
+use std::process::exit;
 use std::str;
 use std::time::Instant;
 
 const FILE_NAME: &str = "package.json";
+const NOT_AN_IMPORT: &str = "import";
 
 #[derive(Serialize, Deserialize)]
 #[allow(non_snake_case)]
@@ -29,10 +33,10 @@ pub fn path_exists(path: &str) -> bool {
 fn main() {
     let now = Instant::now();
 
-    let matches = App::new("depster")
+    let matches = App::new("depcheck-quick")
         .version("0.0.2")
         .author("spelexander")
-        .about("Organise and optimise your package.json packages with depster")
+        .about("Organise and optimise your package.json packages with depcheck-quick")
         .arg(
             Arg::with_name("root")
                 .short("r")
@@ -45,15 +49,6 @@ fn main() {
                 .short("s")
                 .long("src")
                 .help("Directory path containing the input source files, defaults to ./src")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("ext")
-                .short("e")
-                .long("ext")
-                .help(
-                    "Regex for file extensions to scan, defaults to (.tsx|.ts|.jsx|.js|.mjs|.cjs)",
-                )
                 .takes_value(true),
         )
         .get_matches();
@@ -71,19 +66,18 @@ fn main() {
         .unwrap_or(format!("{}/{}", &root, FILE_NAME));
 
     if !path_exists(&package_json_path) {
-        panic!("{}/{} not found, doing nothing.", &root, FILE_NAME);
+        println!("📦  {}/{} Not found, exiting", &root, FILE_NAME);
+        exit(0);
     } else if !path_exists(&src) {
-        panic!("{} not found, doing nothing.", &src);
+        println!("📦  {} Not found, exiting", &src);
     }
 
-    println!("🔬  scanning: {}", &src);
-
     let package: String = fs::read_to_string(package_json_path).expect("Unable to find file");
-    let package: Package =
-        serde_json::from_str(&package).expect("Unable to read file. Is it json?");
+    let package: Package = serde_json::from_str(&package).expect("Unable to read file. Is it json?");
 
+    println!("🔬  Scanning: {}", &src);
     println!(
-        "📦  dependencies: {} / {} dev",
+        "📦  Dependencies: {} / {} dev",
         package.dependencies.keys().len(),
         package.devDependencies.keys().len()
     );
@@ -118,11 +112,11 @@ fn main() {
         }
     }
 
+    println!("📦  Used dependencies: {}", &new_deps.len());
+
     for (dep, version) in &package.devDependencies {
         new_dev_deps.insert(dep.to_owned(), version.to_owned());
     }
-
-    println!("📦  used dependencies: {}", &new_deps.len());
 
     let new_package = Package {
         dependencies: new_deps,
@@ -133,11 +127,10 @@ fn main() {
     let output =
         serde_json::to_string_pretty(&new_package).expect("Could not serialise output json");
 
-    println!("📦  proposed changes:");
+    println!("📦  Proposed changes:");
     println!("{}", diff_lines(&input, &output));
-
     let elapsed = now.elapsed();
-    println!("⌛  done in {:.2?}", elapsed);
+    println!("⌛  Done in {:.2?}", elapsed);
 }
 
 fn scan_files<'a>(
@@ -168,7 +161,17 @@ fn scan_files<'a>(
             }
 
             let path = dir_entry.path();
-            let file_content = fs::read(path).expect(":(");
+
+            // Only read the file up to the first constant (assume imports are at the top and are es6 only)
+            let f = BufReader::new(File::open(path).expect(":("));
+            let mut file_content = Vec::<u8>::new();
+            for line in f.lines() {
+                let value = line.unwrap();
+                if value.trim().len() > 0 && !value.contains(NOT_AN_IMPORT) {
+                    break;
+                }
+                file_content.extend_from_slice(&value.as_bytes());
+            }
 
             for matcher in searcher.leftmost_find_iter(file_content) {
                 let val = matcher.value();
