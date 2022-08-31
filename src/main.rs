@@ -1,4 +1,7 @@
 #![deny(clippy::all)]
+
+mod bench;
+
 extern crate clap;
 
 use clap::{App, Arg};
@@ -10,14 +13,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::format;
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::fs::File;
 use std::process::exit;
 use std::str;
 use std::time::Instant;
+use regex::Regex;
 
 const FILE_NAME: &str = "package.json";
-const NOT_AN_IMPORT: &str = "import";
 
 #[derive(Serialize, Deserialize)]
 #[allow(non_snake_case)]
@@ -138,6 +141,7 @@ fn scan_files<'a>(
     matcher: &HashSet<&str>,
     dep_list: &'a HashSet<String>,
 ) -> HashSet<&'a String> {
+
     let dep_by_id: HashMap<usize, &String> = dep_list.iter().enumerate().collect();
 
     let searcher: DoubleArrayAhoCorasick<u16> = DoubleArrayAhoCorasickBuilder::new()
@@ -156,29 +160,30 @@ fn scan_files<'a>(
                 return elements;
             }
 
+            let file_name = dir_entry.path().extension().unwrap().to_str().unwrap();
             if !matcher.contains(dir_entry.path().extension().unwrap().to_str().unwrap()) {
                 return elements;
             }
 
-            let path = dir_entry.path();
-
             // Only read the file up to the first constant (assume imports are at the top and are es6 only)
-            let f = BufReader::new(File::open(path).expect(":("));
+            let path = dir_entry.path();
+            let f = BufReader::new(File::open(path).expect(&*format!("Unable to open file {}", file_name)));
             let mut file_content = Vec::<u8>::new();
+
             for line in f.lines() {
                 let value = line.unwrap();
-                if value.trim().len() <= 0 {
+                let value = value.trim();
+
+                // if line can't contain an import continue
+                if value.len() <= 0  || value.starts_with("//") || value.starts_with("/*") {
                     continue;
                 }
 
-                if value.starts_with("//") || value.starts_with("/*") {
-                    continue;
-                }
-
-
-                if !value.contains(NOT_AN_IMPORT) {
+                // if imports are done then break
+                if value.contains("const") || value.contains("let") || value.contains("val") {
                     break;
                 }
+
                 file_content.extend_from_slice(&value.as_bytes());
             }
 

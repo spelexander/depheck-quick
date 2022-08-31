@@ -1,4 +1,5 @@
 use crate::scan_files;
+use crate::scan_files_new;
 
 use regex::Regex;
 use std::collections::HashSet;
@@ -21,10 +22,6 @@ mod tests {
             deps.insert(dep.parse().unwrap());
         }
         return deps;
-    }
-
-    fn get_matcher() -> Regex {
-        return Regex::new(r"(\.tsx$|\.ts$|\.jsx$|\.js$|\.mjs$|\.cjs$)").expect("Invalid extension regex provided");
     }
 
     fn run_bench(runs: u128, f: fn()) -> Stats {
@@ -56,12 +53,25 @@ mod tests {
 
     #[test]
     fn scan_1() {
-        let runs = 50;
+        let runs = 10;
         let closure = || {
-            scan_files(".", &get_matcher(), &get_test_deps());
+            let extensions = HashSet::from(["tsx", "ts", "jsx", "js", "mjs", "cjs"]);
+            scan_files("/Users/alexspence/git/react/packages", &extensions, &get_test_deps());
         };
 
         let stats = run_bench(runs, closure);
         println!("{}: {:?} (n={})", "scan 1", stats, runs);
+    }
+
+    #[test]
+    fn scan_2() {
+        let runs = 10;
+        let closure = || {
+            let extensions = HashSet::from(["tsx", "ts", "jsx", "js", "mjs", "cjs"]);
+            scan_files_new("/Users/alexspence/git/react/packages", &extensions, &get_test_deps());
+        };
+
+        let stats = run_bench(runs, closure);
+        println!("{}: {:?} (n={})", "scan 2", stats, runs);
     }
 }
