@@ -1,87 +1,57 @@
-# depster
+# 🔬 depcheck-quick
 
+Status: (work in progress - v0.0.5)
+
+**⚡ Searches for unused npm dependencies in javascript projects, quickly.**
+
+<img src="./resources/demo.png" alt="depcheck-quick demo image" width="300"/>
+
+## Install and build 
+
+`cargo build --release`
+
+Then use the executable:
+`./target/release/depcheck-quick --help`
+
+## Usage
+
+Basic usage:
 ```bash
+$ depcheck-quick --root .
+```
 
-$ depster --root ./frontend --src ./frontend/src
-🔬  ./frontend/package.json found
-🔬  scanning: ./frontend/src
-📦  current packages: 54 / 15 dev
-📦  used packages: 28 / 1 dev
-📦  proposed changes:
-{
-  "dependencies": {
-    "@apollo/client": "^3.3.6",
-    "@material-ui/core": "^4.11.0",
-    "@material-ui/icons": "^4.9.1",
-    "@material-ui/lab": "^4.0.0-alpha.51",
-    "@material-ui/styles": "^4.9.10",
-    "@react-firebase/auth": "^0.2.10",
-    "@react-hook/debounce": "^3.0.0",
-    "@testing-library/jest-dom": "^4.2.4",
-    "@testing-library/react": "^9.3.2",
-    "@testing-library/user-event": "^7.1.2",
-    "@types/dotenv": "^8.2.0",
-    "@types/jest": "^24.0.0",
-    "@types/lodash.clone": "^4.5.6",
-    "@types/lodash.get": "^4.4.6",
-    "@types/lodash.omit": "^4.5.6",
-    "@types/lodash.remove": "^4.7.6",
-    "@types/lodash.set": "^4.3.6",
-    "@types/node": "^13.9.1",
-    "@types/react": "^16.9.34",
-    "@types/react-dom": "^16.9.0",
-    "@types/react-highlight-words": "^0.16.1",
-    "@types/react-router-dom": "^5.1.5",
-    "dotenv": "^8.2.0",
-    "firebase": "^8.2.1",
-    "fuse.js": "^6.4.6",
-    "graphql": "^15.3.0",
-    "lighten-darken-color": "^1.0.0",
-    "lodash": "^4.17.21",
-    "lodash.clone": "^4.5.0",
-    "lodash.get": "^4.4.2",
-    "lodash.omit": "^4.5.0",
-    "lodash.remove": "^4.7.0",
-    "lodash.set": "^4.3.2",
-    "material-ui-chip-input": "^1.1.0",
-    "material-ui-popup-state": "^1.7.2",
-    "notistack": "^1.0.3",
-    "prop-types": "^15.7.2",
-    "react": "^16.12.0",
-    "react-device-detect": "^1.12.0",
-    "react-dom": "^16.12.0",
-    "react-google-button": "^0.7.1",
-    "react-highlight-words": "^0.17.0",
-    "react-hook-form": "^6.13.1",
-    "react-horizontal-scrolling-menu": "^0.7.8",
-    "react-media": "^1.10.0",
-    "react-router-dom": "^5.2.0",
-    "react-scripts": "3.4.0",
-    "react-scroll-horizontal": "^1.6.6",
-    "react-sweet-state": "^2.4.4",
-    "react-use-poll": "^1.1.2",
-    "react-uuid": "^1.0.2",
-    "string-to-color": "^2.2.2",
-    "typescript": "^3.8.3",
-    "use-clipboard-hook": "^1.1.1"
-  },
-  "devDependencies": {
-    "@babel/core": "^7.12.3",
-    "@storybook/addon-actions": "^6.0.27",
-    "@storybook/addon-essentials": "^6.0.27",
-    "@storybook/addon-links": "^6.0.27",
-    "@storybook/node-logger": "^6.0.27",
-    "@storybook/preset-create-react-app": "^3.1.4",
-    "@storybook/react": "^6.0.27",
-    "@testing-library/dom": "^7.0.4",
-    "@typescript-eslint/parser": "^2.24.0",
-    "babel-loader": "8.0.6",
-    "babel-plugin-module-resolver": "^4.1.0",
-    "eslint": "^6.8.0",
-    "husky": "^5.0.6",
-    "prettier": "2.2.1",
-    "react-is": "^17.0.1"
-    "@storybook/react": "^6.0.27"
-  }
-}
+Or, for available options:
+```bash
+$ depcheck-quick --help
+```
+
+
+## Conformance
+`depcheck-quick` is not fully featured, `depcheck` can do more and is more accurate.
+
+It does not use an es module parser, it instead uses multiple term search using [Double-Array Aho-Corasick](https://github.com/daac-tools/daachorse).
+It does not check for missing dependencies. 
+It only supports: "tsx", "ts", "jsx", "js", "mjs", "cjs" extension searching.
+
+## Performance
+
+Benchmarks were done using [Hyperfine](https://github.com/sharkdp/hyperfine").
+
+Running on the [react](https://github.com/facebook/react) (~1900 js files) repo with a custom set of unused dependencies (150):
+```bash
+Benchmark 1: depcheck-quick --root . --src packages
+  Time (mean ± σ):      35.1 ms ±   3.6 ms    [User: 64.3 ms, System: 41.5 ms]
+  Range (min … max):    31.2 ms …  51.8 ms    53 runs
+
+  Warning: Ignoring non-zero exit code.
+
+Benchmark 2: depcheck --skip-missing --ignore-patterns *.css *.coffee
+  Time (mean ± σ):     883.5 ms ±  14.1 ms    [User: 865.4 ms, System: 136.8 ms]
+  Range (min … max):   865.1 ms … 914.0 ms    10 runs
+
+  Warning: Ignoring non-zero exit code.
+
+Summary
+  'depcheck-quick --root . --src packages' ran
+   25.16 ± 2.64 times faster than 'depcheck --skip-missing --ignore-patterns *.css *.coffee'
 ```

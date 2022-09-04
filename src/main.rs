@@ -1,30 +1,23 @@
-#![deny(clippy::all)]
-
-mod bench;
+mod scan_files;
+mod tests;
 
 extern crate clap;
 
 use clap::{App, Arg};
-use daachorse::{DoubleArrayAhoCorasick, DoubleArrayAhoCorasickBuilder, MatchKind};
-use jwalk::{Parallelism, WalkDir};
 use prettydiff::diff_lines;
-use rayon::prelude::*;
+use scan_files::scan_files;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::format;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
-use std::io::{BufRead, BufReader, Read};
-use std::fs::File;
 use std::process::exit;
 use std::str;
 use std::time::Instant;
-use regex::Regex;
 
 const FILE_NAME: &str = "package.json";
 
 #[derive(Serialize, Deserialize)]
 #[allow(non_snake_case)]
-struct Package {
+pub struct Package {
     dependencies: BTreeMap<String, String>,
     devDependencies: BTreeMap<String, String>,
 }
@@ -37,7 +30,7 @@ fn main() {
     let now = Instant::now();
 
     let matches = App::new("depcheck-quick")
-        .version("0.0.2")
+        .version("0.0.5")
         .author("spelexander")
         .about("Organise and optimise your package.json packages with depcheck-quick")
         .arg(
@@ -51,7 +44,7 @@ fn main() {
             Arg::with_name("src")
                 .short("s")
                 .long("src")
-                .help("Directory path containing the input source files, defaults to ./src")
+                .help("Sub directory path containing the input source files, defaults to ./src")
                 .takes_value(true),
         )
         .get_matches();
@@ -76,7 +69,8 @@ fn main() {
     }
 
     let package: String = fs::read_to_string(package_json_path).expect("Unable to find file");
-    let package: Package = serde_json::from_str(&package).expect("Unable to read file. Is it json?");
+    let package: Package =
+        serde_json::from_str(&package).expect("Unable to read file. Is it json?");
 
     println!("🔬  Scanning: {}", &src);
     println!(
@@ -134,77 +128,4 @@ fn main() {
     println!("{}", diff_lines(&input, &output));
     let elapsed = now.elapsed();
     println!("⌛  Done in {:.2?}", elapsed);
-}
-
-fn scan_files<'a>(
-    path: &str,
-    matcher: &HashSet<&str>,
-    dep_list: &'a HashSet<String>,
-) -> HashSet<&'a String> {
-
-    let dep_by_id: HashMap<usize, &String> = dep_list.iter().enumerate().collect();
-
-    let searcher: DoubleArrayAhoCorasick<u16> = DoubleArrayAhoCorasickBuilder::new()
-        .match_kind(MatchKind::LeftmostLongest)
-        .build(dep_list)
-        .unwrap();
-
-    let found_deps: HashSet<&String> = WalkDir::new(path)
-        .parallelism(Parallelism::RayonNewPool(0))
-        .into_iter()
-        .par_bridge()
-        .fold(HashSet::new, |mut elements, dir_entry_result| {
-            let dir_entry = dir_entry_result.expect(":(");
-
-            if !dir_entry.file_type().is_file() {
-                return elements;
-            }
-
-            let file_name = dir_entry.path().extension().unwrap().to_str().unwrap();
-            if !matcher.contains(dir_entry.path().extension().unwrap().to_str().unwrap()) {
-                return elements;
-            }
-
-            // Only read the file up to the first constant (assume imports are at the top and are es6 only)
-            let path = dir_entry.path();
-            let f = BufReader::new(File::open(path).expect(&*format!("Unable to open file {}", file_name)));
-            let mut file_content = Vec::<u8>::new();
-
-            for line in f.lines() {
-                let value = line.unwrap();
-                let value = value.trim();
-
-                // if line can't contain an import continue
-                if value.len() <= 0  || value.starts_with("//") || value.starts_with("/*") {
-                    continue;
-                }
-
-                // if imports are done then break
-                if value.contains("const") || value.contains("let") || value.contains("val") {
-                    break;
-                }
-
-                file_content.extend_from_slice(&value.as_bytes());
-            }
-
-            for matcher in searcher.leftmost_find_iter(file_content) {
-                let val = matcher.value();
-                elements.insert(val);
-            }
-
-            elements
-        })
-        .reduce(HashSet::new, |mut a, b| {
-            a.extend(b);
-            return a;
-        })
-        .iter()
-        .map(|v| {
-            *dep_by_id
-                .get(&(*v as usize))
-                .expect("Invalid pattern index returned")
-        })
-        .collect();
-
-    found_deps
 }
